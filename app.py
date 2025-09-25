@@ -1,6 +1,5 @@
 import streamlit as st
 import re
-import pandas as pd
 import io
 
 # Настройки страницы
@@ -10,18 +9,15 @@ st.set_page_config(
     page_icon="🎾"
 )
 
-# Заголовок
 st.title("🎾 Tennis Expert vs Market --- Full Analysis")
 st.markdown("---")
 
 OUTCOMES = ['2:0', '2:1', '1:2', '0:2']
 
 def extract_matches(line):
-    """Извлекает все фрагменты вида '1-(...)'"""
     return re.findall(r'\d+-\([^)]+\)', line)
 
 def parse_match_part(part):
-    """Парсит '1-(2:0,1:2)' → (номер_матча, ['2:0', '1:2'])"""
     match = re.match(r'^(\d+)-\((.+)\)$', part.strip())
     if not match:
         return None, None
@@ -37,7 +33,6 @@ def parse_match_part(part):
         return None, None
 
 def parse_odds(text):
-    """Парсит коэффициенты: '1\t1.65\t2.24' → {1: {'p1': 1.65, 'p2': 2.24}}"""
     odds = {}
     lines = text.strip().split('\n')
     for line in lines:
@@ -57,7 +52,6 @@ def parse_odds(text):
     return odds
 
 def analyze_data(expert_text):
-    # Подсчёт паттернов
     patterns = {
         'full_uncertainty': {i: 0 for i in range(1, 16)},
         'battle_3set': {i: 0 for i in range(1, 16)},
@@ -122,91 +116,91 @@ def analyze_data(expert_text):
     
     return patterns, triple_patterns, match_totals, total_experts
 
+def find_value_bets(match_totals, odds_data):
+    candidates = []
+    min_votes = 10
+    min_value = 1.15
+
+    for match_num in range(1, 15):
+        if match_num not in odds_data:
+            continue
+            
+        totals = match_totals[match_num]
+        total_votes = sum(totals.values())
+        if total_votes == 0:
+            continue
+
+        bk = odds_data[match_num]
+        implied_total = 1/bk['p1'] + 1/bk['p2']
+
+        # === Анализ П1 ===
+        p1_expert = (totals['2:0'] + totals['2:1']) / total_votes
+        votes_p1 = totals['2:0'] + totals['2:1']
+        fair_p1 = (1 / bk['p1']) / implied_total
+        value_ratio_p1 = p1_expert / fair_p1
+
+        if p1_expert > fair_p1 and value_ratio_p1 >= min_value and votes_p1 >= min_votes:
+            candidates.append({
+                'match': match_num,
+                'side': 'П1',
+                'exp_prob': p1_expert,
+                'fair_prob': fair_p1,
+                'odd': bk['p1'],
+                'value': value_ratio_p1,
+                'votes': votes_p1,
+                'total': total_votes
+            })
+
+        # === Анализ П2 ===
+        p2_expert = (totals['1:2'] + totals['0:2']) / total_votes
+        votes_p2 = totals['1:2'] + totals['0:2']
+        fair_p2 = (1 / bk['p2']) / implied_total
+        value_ratio_p2 = p2_expert / fair_p2
+
+        if p2_expert > fair_p2 and value_ratio_p2 >= min_value and votes_p2 >= min_votes:
+            candidates.append({
+                'match': match_num,
+                'side': 'П2',
+                'exp_prob': p2_expert,
+                'fair_prob': fair_p2,
+                'odd': bk['p2'],
+                'value': value_ratio_p2,
+                'votes': votes_p2,
+                'total': total_votes
+            })
+
+    # Сортируем по value ratio (лучшие — первые)
+    candidates.sort(key=lambda x: x['value'], reverse=True)
+    return candidates
+
 def format_output(patterns, triple_patterns, match_totals, total_experts, odds_data):
-    """Форматирует вывод точно как в стационарной версии"""
     output = io.StringIO()
-    
     output.write(f"Обработано экспертов: {total_experts}\n\n")
-    
-    # 🔴 Полная неопределённость
-    output.write("🔴 ПОЛНАЯ НЕОПРЕДЕЛЁННОСТЬ: -(2:0,2:1,1:2,0:2)\n")
-    output.write("=" * 80 + "\n")
-    found = False
-    for m in range(1, 15):
-        cnt = patterns['full_uncertainty'][m]
-        if cnt > 0:
-            output.write(f"Матч {m}: {cnt} эксперт{'ов' if cnt != 1 else ''}\n")
-            found = True
-    if not found:
-        output.write("Не найдено.\n")
-    output.write("\n")
-    
-    # 🟠 Борьба, возможен третий сет
-    output.write("🟠 БОРЬБА, ВОЗМОЖЕН ТРЕТИЙ СЕТ: -(1:2,0:2)\n")
-    output.write("=" * 80 + "\n")
-    found = False
-    for m in range(1, 15):
-        cnt = patterns['battle_3set'][m]
-        if cnt > 0:
-            output.write(f"Матч {m}: {cnt} эксперт{'ов' if cnt != 1 else ''}\n")
-            found = True
-    if not found:
-        output.write("Не найдено.\n")
-    output.write("\n")
-    
-    # 🟡 Небольшое преимущество второму
-    output.write("🟡 НЕБОЛЬШОЕ ПРЕИМУЩЕСТВО ВТОРОМУ: -(2:1,0:2)\n")
-    output.write("=" * 80 + "\n")
-    found = False
-    for m in range(1, 15):
-        cnt = patterns['slight_advantage_away'][m]
-        if cnt > 0:
-            output.write(f"Матч {m}: {cnt} эксперт{'ов' if cnt != 1 else ''}\n")
-            found = True
-    if not found:
-        output.write("Не найдено.\n")
-    output.write("\n")
-    
-    # 🟢 Равные шансы
-    output.write("🟢 РАВНЫЕ ШАНСЫ: -(2:1,1:2)\n")
-    output.write("=" * 80 + "\n")
-    found = False
-    for m in range(1, 15):
-        cnt = patterns['close_fight'][m]
-        if cnt > 0:
-            output.write(f"Матч {m}: {cnt} эксперт{'ов' if cnt != 1 else ''}\n")
-            found = True
-    if not found:
-        output.write("Не найдено.\n")
-    output.write("\n")
-    
-    # 🟣 Чёткий разброс
-    output.write("🟣 ЧЁТКИЙ РАЗБРОС: -(2:0,0:2)\n")
-    output.write("=" * 80 + "\n")
-    found = False
-    for m in range(1, 15):
-        cnt = patterns['split_fav_vs_underdog'][m]
-        if cnt > 0:
-            output.write(f"Матч {m}: {cnt} эксперт{'ов' if cnt != 1 else ''}\n")
-            found = True
-    if not found:
-        output.write("Не найдено.\n")
-    output.write("\n")
-    
-    # 🔵 Уверенность в фаворите, но с борьбой
-    output.write("🔵 УВЕРЕННОСТЬ В ФАВОРИТЕ, НО С БОРЬБОЙ: -(2:0,2:1)\n")
-    output.write("=" * 80 + "\n")
-    found = False
-    for m in range(1, 15):
-        cnt = patterns['fav_with_battle'][m]
-        if cnt > 0:
-            output.write(f"Матч {m}: {cnt} эксперт{'ов' if cnt != 1 else ''}\n")
-            found = True
-    if not found:
-        output.write("Не найдено.\n")
-    output.write("\n")
-    
-    # 🔹 Тройные комбинации
+
+    # === Паттерны (без изменений) ===
+    pattern_list = [
+        ('full_uncertainty', "🔴 ПОЛНАЯ НЕОПРЕДЕЛЁННОСТЬ: -(2:0,2:1,1:2,0:2)"),
+        ('battle_3set', "🟠 БОРЬБА, ВОЗМОЖЕН ТРЕТИЙ СЕТ: -(1:2,0:2)"),
+        ('slight_advantage_away', "🟡 НЕБОЛЬШОЕ ПРЕИМУЩЕСТВО ВТОРОМУ: -(2:1,0:2)"),
+        ('close_fight', "🟢 РАВНЫЕ ШАНСЫ: -(2:1,1:2)"),
+        ('split_fav_vs_underdog', "🟣 ЧЁТКИЙ РАЗБРОС: -(2:0,0:2)"),
+        ('fav_with_battle', "🔵 УВЕРЕННОСТЬ В ФАВОРИТЕ, НО С БОРЬБОЙ: -(2:0,2:1)")
+    ]
+
+    for key, title in pattern_list:
+        output.write(f"{title}\n")
+        output.write("=" * 80 + "\n")
+        found = False
+        for m in range(1, 15):
+            cnt = patterns[key][m]
+            if cnt > 0:
+                output.write(f"Матч {m}: {cnt} эксперт{'ов' if cnt != 1 else ''}\n")
+                found = True
+        if not found:
+            output.write("Не найдено.\n")
+        output.write("\n")
+
+    # === Тройные комбинации ===
     triples_map = [
         (triple_patterns['triple_20_21_12'], '🔹 Фаворит, но с риском: -(2:0,2:1,1:2)'),
         (triple_patterns['triple_20_21_02'], '🔹 Фаворит может проиграть: -(2:0,2:1,0:2)'),
@@ -226,14 +220,13 @@ def format_output(patterns, triple_patterns, match_totals, total_experts, odds_d
         if not found:
             output.write("Не найдено.\n")
         output.write("\n")
-    
-    # 🔢 Распределение
+
+    # === Распределение ===
     output.write("🔢 РАСПРЕДЕЛЕНИЕ ПРОГНОЗОВ ПО КАЖДОМУ МАТЧУ (1--14)\n")
     output.write("=" * 80 + "\n")
     header = f"{'№':<3} {'2:0':<6} {'2:1':<6} {'1:2':<6} {'0:2':<6} {'Σ':<6}"
     output.write(header + "\n")
     output.write("-" * 80 + "\n")
-    
     for m in range(1, 15):
         t = match_totals[m]
         total = sum(t.values())
@@ -241,103 +234,27 @@ def format_output(patterns, triple_patterns, match_totals, total_experts, odds_d
             line = f"{m:<3} {t['2:0']:<6} {t['2:1']:<6} {t['1:2']:<6} {t['0:2']:<6} {total:<6}"
             output.write(line + "\n")
     output.write("\n")
-    
+
+    # === ОСНОВНОЙ ВЫВОД: ТОП-6 ВАЛУЙНЫХ СТАВОК (П1 и П2) ===
     if not odds_data:
         output.write("⚠️ Коэффициенты не загружены --- анализ пропущен.\n\n")
     else:
-        # 🏆 ТОП-6: СТАВКИ ПРОТИВ РЫНКА
-        candidates = []
-        for match_num in range(1, 15):
-            if match_num not in odds_data:
-                continue
-                
-            totals = match_totals[match_num]
-            total_votes = sum(totals.values())
-            if total_votes == 0:
-                continue
-                
-            p2_expert = (totals['1:2'] + totals['0:2']) / total_votes
-            votes_p2 = totals['1:2'] + totals['0:2']
-            
-            bk = odds_data[match_num]
-            implied_total = 1/bk['p1'] + 1/bk['p2']
-            fair_p2 = (1 / bk['p2']) / implied_total
-            
-            value_ratio = p2_expert / fair_p2
-            
-            min_votes = 10
-            min_value = 1.15
-            
-            if p2_expert > fair_p2 and value_ratio >= min_value and votes_p2 >= min_votes:
-                candidates.append({
-                    'match': match_num,
-                    'exp_prob': p2_expert,
-                    'fair_prob': fair_p2,
-                    'odd': bk['p2'],
-                    'value': value_ratio,
-                    'votes': votes_p2,
-                    'total': total_votes
-                })
-        
-        candidates.sort(key=lambda x: x['value'], reverse=True)
-        
-        output.write("🏆 ТОП-6: СТАВКИ ПРОТИВ РЫНКА (эксперты > рынок)\n")
+        candidates = find_value_bets(match_totals, odds_data)
+        output.write("🏆 ТОП-6: ЛУЧШИЕ ВАЛУЙНЫЕ СТАВКИ (П1 и П2)\n")
         output.write("=" * 80 + "\n")
         
         if not candidates:
-            output.write("⚠️ Не найдено ни одной ставки против рынка.\n\n")
+            output.write("⚠️ Не найдено ни одной валуйной ставки.\n\n")
         else:
             for i, c in enumerate(candidates[:6], 1):
-                output.write(f"{i}. МАТЧ {c['match']}:\n")
-                output.write(f" 📊 Поддержка аутсайдера: {c['votes']}/{c['total']} ({c['exp_prob']:.1%})\n")
+                output.write(f"{i}. МАТЧ {c['match']} → СТАВКА НА {c['side']}:\n")
+                output.write(f" 📊 Поддержка: {c['votes']}/{c['total']} ({c['exp_prob']:.1%})\n")
                 output.write(f" 📈 Коэффициент: {c['odd']} → подразумевает {c['fair_prob']:.1%}\n")
                 output.write(f" 🎯 Value ratio: {c['value']:.2f}x\n\n")
-        
-        # 🛡️ ТОП-3: СТАВКИ ПРОТИВ ЭКСПЕРТОВ, НО ПО РЫНКУ
-        candidates = []
-        for match_num in range(1, 15):
-            if match_num not in odds_data:
-                continue
-                
-            totals = match_totals[match_num]
-            total_votes = sum(totals.values())
-            if total_votes == 0:
-                continue
-                
-            p1_expert = (totals['2:0'] + totals['2:1']) / total_votes
-            p2_expert = (totals['1:2'] + totals['0:2']) / total_votes
-            
-            bk = odds_data[match_num]
-            implied_total = 1/bk['p1'] + 1/bk['p2']
-            fair_p2 = (1 / bk['p2']) / implied_total
-            
-            if p1_expert > 0.70 and fair_p2 > 0.45 and fair_p2 > p2_expert * 1.1:
-                candidates.append({
-                    'match': match_num,
-                    'p1_expert': p1_expert,
-                    'fair_p2': fair_p2,
-                    'odd_p2': bk['p2'],
-                    'divergence': fair_p2 - p2_expert,
-                    'total': total_votes
-                })
-        
-        candidates.sort(key=lambda x: x['divergence'], reverse=True)
-        
-        output.write("🛡️ ТОП-3: СТАВКИ ПРОТИВ ЭКСПЕРТОВ, НО ПО РЫНКУ\n")
-        output.write("=" * 80 + "\n")
-        
-        if not candidates:
-            output.write("⚠️ Не найдено ни одного случая переоценки фаворита.\n\n")
-        else:
-            for i, c in enumerate(candidates[:3], 1):
-                output.write(f"{i}. МАТЧ {c['match']}:\n")
-                output.write(f" 🧠 Эксперты: П1 --- {c['p1_expert']:.1%}\n")
-                output.write(f" 📈 Рынок: П2 --- {c['fair_p2']:.1%} (коэф {c['odd_p2']})\n")
-                output.write(f" 💡 Рынок на {c['divergence']:+.1%} выше оценивает П2\n\n")
-    
+
     return output.getvalue()
 
-# Интерфейс приложения
+# === Интерфейс ===
 col1, col2 = st.columns([1, 1])
 
 with col1:
@@ -346,7 +263,7 @@ with col1:
     expert_text = st.text_area(
         "Введите прогнозы:", 
         height=200,
-        placeholder="1-(2:0,2:1)\n2-(1:2,0:2)\n3-(2:0)\n4-(0:2)\n5-(2:0)"
+        placeholder="1-(2:0,2:1)\n2-(1:2,0:2)\n3-(2:0)\n4-(0:2)"
     )
 
 with col2:
@@ -355,10 +272,9 @@ with col2:
     odds_text = st.text_area(
         "Введите коэффициенты:", 
         height=200,
-        placeholder="1\t1.65\t2.24\n2\t1.85\t2.00\n3\t1.70\t2.15"
+        placeholder="1\t1.65\t2.24\n2\t1.85\t2.00"
     )
 
-# Кнопка анализа
 if st.button("🚀 Анализировать", type="primary", use_container_width=True):
     if not expert_text.strip():
         st.error("⚠️ Введите прогнозы экспертов!")
@@ -366,35 +282,27 @@ if st.button("🚀 Анализировать", type="primary", use_container_wi
         with st.spinner("🔍 Анализируем данные..."):
             patterns, triple_patterns, match_totals, total_experts = analyze_data(expert_text)
             odds_data = parse_odds(odds_text)
-            
-            # Формируем вывод точно как в стационарной версии
             result_text = format_output(patterns, triple_patterns, match_totals, total_experts, odds_data)
             
-            # Выводим результат
-            st.success(f"✅ Анализ завершен! Обработано экспертов: {total_experts}")
-            
-            # Показываем результат в текстовом поле для точного соответствия
-            st.subheader("📋 Результаты анализа (точный формат)")
+            st.success(f"✅ Анализ завершён! Обработано экспертов: {total_experts}")
+            st.subheader("📋 Результаты анализа")
             st.text_area("Результат:", value=result_text, height=600, key="results")
             
-            # Кнопка скачивания
             st.download_button(
-                label="📥 Скачать отчет",
+                label="📥 Скачать отчёт",
                 data=result_text,
                 file_name="tennis_analysis_report.txt",
                 mime="text/plain"
             )
 
-# Боковая панель с инструкцией
+# === Инструкция ===
 st.sidebar.title("📖 Инструкция")
 st.sidebar.markdown("""
 ### Как использовать:
+1. Введите прогнозы экспертов (слева)
+2. Введите коэффициенты через **табуляцию** (справа)
+3. Нажмите **«Анализировать»**
+4. Получите **ТОП-6 рекомендаций** с чётким указанием: **П1 или П2**
 
-1. **Введите прогнозы** в левом поле
-2. **Введите коэффициенты** в правом поле  
-3. **Нажмите "Анализировать"**
-4. **Получите полный отчет** в точности как в стационарной версии
+💡 Алгоритм ищет **расхождения между экспертами и рынком** — и предлагает **наиболее недооценённые исходы**.
 """)
-
-st.sidebar.markdown("---")
-st.sidebar.info("🎯 Точная копия стационарной версии на Streamlit")
