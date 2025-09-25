@@ -13,6 +13,7 @@ st.title("🎾 Tennis Expert vs Market --- Full Analysis")
 st.markdown("---")
 
 OUTCOMES = ['2:0', '2:1', '1:2', '0:2']
+MIN_ODDS = 1.45  # Исключаем коэффициенты ≤ 1.45
 
 def extract_matches(line):
     return re.findall(r'\d+-\([^)]+\)', line)
@@ -134,40 +135,42 @@ def find_value_bets(match_totals, odds_data):
         implied_total = 1/bk['p1'] + 1/bk['p2']
 
         # === Анализ П1 ===
-        p1_expert = (totals['2:0'] + totals['2:1']) / total_votes
-        votes_p1 = totals['2:0'] + totals['2:1']
-        fair_p1 = (1 / bk['p1']) / implied_total
-        value_ratio_p1 = p1_expert / fair_p1
+        if bk['p1'] > MIN_ODDS:  # Только если коэффициент > 1.45
+            p1_expert = (totals['2:0'] + totals['2:1']) / total_votes
+            votes_p1 = totals['2:0'] + totals['2:1']
+            fair_p1 = (1 / bk['p1']) / implied_total
+            value_ratio_p1 = p1_expert / fair_p1
 
-        if p1_expert > fair_p1 and value_ratio_p1 >= min_value and votes_p1 >= min_votes:
-            candidates.append({
-                'match': match_num,
-                'side': 'П1',
-                'exp_prob': p1_expert,
-                'fair_prob': fair_p1,
-                'odd': bk['p1'],
-                'value': value_ratio_p1,
-                'votes': votes_p1,
-                'total': total_votes
-            })
+            if p1_expert > fair_p1 and value_ratio_p1 >= min_value and votes_p1 >= min_votes:
+                candidates.append({
+                    'match': match_num,
+                    'side': 'П1',
+                    'exp_prob': p1_expert,
+                    'fair_prob': fair_p1,
+                    'odd': bk['p1'],
+                    'value': value_ratio_p1,
+                    'votes': votes_p1,
+                    'total': total_votes
+                })
 
         # === Анализ П2 ===
-        p2_expert = (totals['1:2'] + totals['0:2']) / total_votes
-        votes_p2 = totals['1:2'] + totals['0:2']
-        fair_p2 = (1 / bk['p2']) / implied_total
-        value_ratio_p2 = p2_expert / fair_p2
+        if bk['p2'] > MIN_ODDS:
+            p2_expert = (totals['1:2'] + totals['0:2']) / total_votes
+            votes_p2 = totals['1:2'] + totals['0:2']
+            fair_p2 = (1 / bk['p2']) / implied_total
+            value_ratio_p2 = p2_expert / fair_p2
 
-        if p2_expert > fair_p2 and value_ratio_p2 >= min_value and votes_p2 >= min_votes:
-            candidates.append({
-                'match': match_num,
-                'side': 'П2',
-                'exp_prob': p2_expert,
-                'fair_prob': fair_p2,
-                'odd': bk['p2'],
-                'value': value_ratio_p2,
-                'votes': votes_p2,
-                'total': total_votes
-            })
+            if p2_expert > fair_p2 and value_ratio_p2 >= min_value and votes_p2 >= min_votes:
+                candidates.append({
+                    'match': match_num,
+                    'side': 'П2',
+                    'exp_prob': p2_expert,
+                    'fair_prob': fair_p2,
+                    'odd': bk['p2'],
+                    'value': value_ratio_p2,
+                    'votes': votes_p2,
+                    'total': total_votes
+                })
 
     # Сортируем по value ratio (лучшие — первые)
     candidates.sort(key=lambda x: x['value'], reverse=True)
@@ -235,12 +238,12 @@ def format_output(patterns, triple_patterns, match_totals, total_experts, odds_d
             output.write(line + "\n")
     output.write("\n")
 
-    # === ОСНОВНОЙ ВЫВОД: ТОП-6 ВАЛУЙНЫХ СТАВОК (П1 и П2) ===
+    # === ОСНОВНОЙ ВЫВОД: ТОП-6 ВАЛУЙНЫХ СТАВОК ===
     if not odds_data:
         output.write("⚠️ Коэффициенты не загружены --- анализ пропущен.\n\n")
     else:
         candidates = find_value_bets(match_totals, odds_data)
-        output.write("🏆 ТОП-6: ЛУЧШИЕ ВАЛУЙНЫЕ СТАВКИ (П1 и П2)\n")
+        output.write("🏆 ТОП-6: ЛУЧШИЕ ВАЛУЙНЫЕ СТАВКИ (П1 и П2, коэф. > 1.45)\n")
         output.write("=" * 80 + "\n")
         
         if not candidates:
@@ -304,5 +307,8 @@ st.sidebar.markdown("""
 3. Нажмите **«Анализировать»**
 4. Получите **ТОП-6 рекомендаций** с чётким указанием: **П1 или П2**
 
-💡 Алгоритм ищет **расхождения между экспертами и рынком** — и предлагает **наиболее недооценённые исходы**.
+💡 Алгоритм:
+- Исключает коэффициенты ≤ 1.45 (низкая эффективность),
+- Ищет расхождения между экспертами и рынком,
+- Выбирает **6 лучших ставок из 14 матчей**.
 """)
